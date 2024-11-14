@@ -914,3 +914,151 @@ function Find-PC {
             & $OutputTanium
         }
     }
+
+function Get-DepartmentOUMap {
+    param(
+        [string]$OU = "*"
+    )
+    # Gets computer filtering and outputs the key needed
+    get-adcomputer -filter * -searchbase $OU | 
+    select-object @{Name='name'; Expression={ if ($_.Name -match '^[^\d]+') { $matches[0] } }},@{Name='OU'; Expression={$_.DistinguishedName -replace '^.+?(?<!\\),',''} } | 
+    sort-object name -Unique | foreach-object { 
+        if ($_.name.length -le 4) {
+            write-host "`'$($_.name)`' `t`t= `'$($_.OU)`'"
+        } elseif ($_.name.length -lt 13) {
+            write-host "`'$($_.name)`' `t= `'$($_.OU)`'" 
+        }
+
+    }
+    Write-Host "Please go through and verify list, remove any entries, then copy and paste your results into this script under the variable " -nonewline -ForegroundColor Yellow
+    write-host "`$departmentOUMap" -ForegroundColor Cyan
+}
+
+function Get-DepartmentCode {
+    param (
+        [string]$computerName
+    )
+
+    # Assuming department code is the initial 2-5 letters
+    $deptCode = $computerName -replace '\d.*$', '' # Remove numbers, keep letters
+    return $deptCode
+}
+
+function Move-ComputerOUAuto {
+    param(
+        [string]$OU = "*"
+    )
+
+    $departmentOUMap = @{
+        # Set computer Prefix name and the OU
+        # Example: 
+        # 'Prefix'      = 'OU=Computers,OU=Your,DC=domain,DC=location'
+    }
+
+
+    if ($departmentOUMap.count -eq 0) {
+        write-host "ERROR: [" -NoNewline -ForegroundColor red
+        write-host "`$departmentOUMap" -nonewline -foregroundcolor cyan
+        write-host "] is empty.  Please run [" -NoNewline -ForegroundColor red
+        write-host "Get-DepartmentOUMap" -nonewline
+        write-host "] and edit the [" -nonewline -ForegroundColor Red
+        write-host "`$departmentOUMap" -nonewline -foregroundcolor cyan
+        write-host "] variable and try again" -ForegroundColor red
+        return
+    }
+
+    # Get all computer objects from AD
+    $computers = Get-ADComputer -Filter * -Property Name -SearchBase $OU
+
+    $IncorrectDevices = @()
+
+    foreach ($computer in $computers) {
+        $computerName = $computer.Name
+        $deptCode = Get-DepartmentCode -computerName $computerName
+
+        # Find the OU based on the department code
+        $targetOU = $null
+        $currentOU = $computer.DistinguishedName -Replace '^.+?(?<!\\),', ''
+
+        foreach ($key in $departmentOUMap.Keys) {
+            if ($deptCode -like "$key*") {
+                $targetOU = $departmentOUMap[$key]
+            
+                if ($currentOU -notlike $targetOU) {
+                    $IncorrectDevices += $computerName
+                    write-host "$computerName"
+                    write-host "Current OU: $currentOU" -ForegroundColor red
+                    write-host "Target OU: $targetOU" -ForegroundColor green
+                    write-host ""
+                    move-ADobject -Identity $computer.DistinguishedName -TargetPath $targetOU -verbose
+                    break
+                }
+            }
+        }
+    }
+}
+
+function Get-EntraBitlockerKeys {
+    connect-mgGraph -Scopes "User.Read.All","Group.Read.All" -NoWelcome
+
+    $startTime = get-date
+    
+    Write-Host "Grabbing all encrypted devices from Intune" -ForegroundColor Cyan
+    $Devices = get-mgdevicemanagementManagedDevice -Filter "OperatingSystem eq 'Windows'" -all | where-object Isencrypted -eq true
+
+
+    # Grabs the total device count to use later on in the Progress
+    $totalDevices = $Devices.Count
+    $allDeviceEncryption = @()
+
+    Write-Host "Success." -ForegroundColor Green
+    Write-Host "Checking Bitlocker information for all devices" -ForegroundColor Cyan
+
+    # Use foreach loop to cycle through each computer grabbed from $Devices
+        foreach ($index in 0..($totalDevices - 1)) {
+            $Device = $Devices[$index]
+            
+            Write-Progress -Activity "Processing computers, Started $($startTime.ToString("MM/dd @ hh:mm tt"))" -Status "Checking $index/$totalDevices - $($Device.DeviceName)" -PercentComplete (($index / $totalDevices) * 100)
+
+            $getBitlock = Get-MgInformationProtectionBitlockerRecoveryKey -Filter "DeviceID eq '$($Device.AzureADDeviceID)'" | select-object Id,CreatedDateTime,DeviceId,@{n="Key";e={(Get-MgInformationProtectionBitlockerRecoveryKey -BitlockerRecoveryKeyId $_.Id -Property key).key}},VolumeType
+
+            if (-not $getBitlock) {
+                $allDeviceEncryption += [PSCustomObject]@{
+                    Name = $Device.DeviceName
+                    Encrypted = $Device.IsEncrypted
+                    User = $Device.UserDisplayName
+                    DeviceID = $Device.Id
+                    CreatedDate = $null
+                    Key = $null
+                    VolumeType = $null
+                }
+            } else {
+            foreach ($BitlockerDevice in $getBitlock) {
+                $BitlockerDevices = Get-MgInformationProtectionBitlockerRecoveryKey -BitlockerRecoveryKeyId "$($BitlockerDevice.ID)" -Property "Key"
+
+                $allDeviceEncryption += [PSCustomObject]@{
+                    Name = $Device.DeviceName
+                    Encrypted = $Device.IsEncrypted
+                    User = $Device.UserDisplayName
+                    DeviceID = $Device.Id
+                    CreatedDate = $BitlockerDevices.CreatedDateTime
+                    Key = $BitlockerDevices.Key
+                    VolumeType = $BitlockerDevices.VolumeType
+                }
+
+            }
+        }
+    }
+
+    Write-Progress -Activity "Processing computers, Started $($startTime.ToString("MM/dd @ hh:mm tt"))" -Completed
+
+    $endTime = Get-Date
+    $elapsedTime = [datetime]$endTime - [datetime]$startTime
+    $elapsedTime = '{0:hh\:mm\:ss}' -f $elapsedTime
+
+    Write-Host "Success!" -ForegroundColor green
+    Write-Host "Completed time: $($endTime.ToString("MM/dd @ hh:mm tt"))" -ForegroundColor Green
+    Write-Host "Total Time elapsed: $elapsedTime" -ForegroundColor Green
+    write-host ""
+    write-host "Please use $allDeviceEncryption | export-csv"
+}
