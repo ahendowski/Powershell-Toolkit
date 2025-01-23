@@ -7,12 +7,11 @@ function Set-Array {
     )
 
     $script:Array = @()
-
-    write-host "Enter a blank space to submit." -ForegroundColor yellow
+    
     if ($Clipboard) {
         $script:Array = (Get-Clipboard).split("\n").split(",").split("|")
     } else {
-        
+        write-host "Enter a blank space to submit." -ForegroundColor yellow
         while (1) {
             read-host | Set-Variable r
             if (!$r) {break}
@@ -73,7 +72,7 @@ function Find-PC {
 
     .EXAMPLE
         Find-PC
-        Find-PC -Auto
+        Find-PC -Autof
         Find-PC -a
         Find-PC -Clipboard
         Find-PC -c
