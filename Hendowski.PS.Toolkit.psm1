@@ -545,13 +545,12 @@ function Get-UninstallString {
 
     param(
         [Parameter(Position=0)]
-        [string]$Program
+        [string]$Program = $null
     )
 
-    write-host $Program
     if ($Program) {
         Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" | where-object Displayname -match $Program | select-object Displayname,displayversion,QuietUninstallString,uninstallstring
-        Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" | where-object DisplayName -like $($Program) | select-object Displayname,displayversion,QuietUninstallString,uninstallstring
+        Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" | where-object DisplayName -match $Program | select-object Displayname,displayversion,QuietUninstallString,uninstallstring
         return
     } 
 
