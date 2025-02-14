@@ -606,3 +606,9 @@ function Get-DeletedADObjects {
         } 
     } 
 }
+
+function ADSync {
+    Invoke-Command -ComputerName TCM1017 -ScriptBlock {
+        Start-ADSyncSyncCycle -PolicyType Delta
+    }
+}
