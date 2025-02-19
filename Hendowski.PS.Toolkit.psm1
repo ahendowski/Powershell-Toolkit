@@ -9,7 +9,8 @@ function Set-Array {
     $script:Array = @()
     
     if ($Clipboard) {
-        $script:Array = (Get-Clipboard).split("\n").split(",").split("|")
+        $script:Array = (Get-Clipboard) -replace "(\r?\n){2,}", "`r`n" -split '[,\|\r\n]' -match '\S+'
+
     } else {
         write-host "Enter a blank space to submit." -ForegroundColor yellow
         while (1) {
@@ -24,6 +25,8 @@ function Set-Array {
         }
     } 
 }
+
+
 function Set-ExportPath {
     # Checks to see if the export filepath has a '\' at the end of it.  If it does not, add it.
     # C:\folder = C:\folder\
@@ -86,7 +89,9 @@ function Find-PC {
         [Alias("c")]
         [switch]$Clipboard,
         [Alias("a")]
-        [switch]$auto
+        [switch]$auto,
+        [Alias("CN")]
+        [switch]$CopyNames
     )
 
     $script:successText = ""
@@ -143,7 +148,7 @@ function Find-PC {
     $failedComputers = @()
     $script:Array = @()
 
-    if ($clipboard -or $auto) {
+    if ($clipboard -or $auto -or $CopyNames) {
         set-array -Clipboard
     } else {
         set-array
@@ -206,6 +211,9 @@ function Find-PC {
         & $OutputTanium
         $combinedOutput = $script:successText + $script:failText + $script:TaniumText
         Set-Clipboard $combinedOutput
+    } elseif ($CopyNames -or $CN) {
+        $successfulComputers.Name | Set-Clipboard
+
     } else {
         & $OutputSuccess
         & $OutputFailed
@@ -610,5 +618,83 @@ function Get-DeletedADObjects {
 function ADSync {
     Invoke-Command -ComputerName TCM1017 -ScriptBlock {
         Start-ADSyncSyncCycle -PolicyType Delta
+    }
+}
+
+function Remove-ADEI {
+    Connect-MGGraph -Scopes "Device.ReadWrite.All" -NoWelcome
+
+    Set-Array -Clipboard
+
+    write-host "Getting Entra devices" -ForegroundColor Cyan
+    $AllEntra = Get-MgDevice -All
+    write-host "Getting Intune devices" -ForegroundColor Green
+    $AllIntune = Get-MgDeviceManagementManagedDevice -All
+    
+    foreach ($device in $script:Array) {
+        $ADDelete = $null
+        $EntraDelete = $null
+        $IntuneDelete = $null
+
+        write-host "Checking $device" -ForegroundColor magenta
+        $ADDelete = Get-ADComputer -filter "SamAccountName -like '*$($device)*'"
+        $EntraDelete = $AllEntra | Where-Object {$_.DisplayName -like "*$($device)*"}
+        $IntuneDelete = $AllIntune | Where-Object {$_.DeviceName -like "*$($device)*"}
+
+        Write-host "All AD Computers to be deleted:" -ForegroundColor Yellow
+
+        foreach ($item in $ADDelete) {
+            write-host "`t$item" -ForegroundColor Yellow
+        }
+
+        write-host "All Entracomputers to be deleted:" -ForegroundColor Cyan
+
+        foreach ($item in $EntraDelete) {
+            write-host "`t$item.DisplayName" -ForegroundColor Cyan
+        }
+
+        write-host "All Intune Computers to be deleted:" -ForegroundColor Green
+        foreach ($item in $IntuneDelete) {
+            write-host "`t$item.DeviceName" -ForegroundColor Green
+        }
+
+        $UserInput = Read-Host "Do you want to delete the above items? (Y/N)"
+
+        if ($UserInput -ne "Y") {
+            write-host "Exiting" -ForegroundColor Red
+            break
+        }
+
+        if ($null -eq $IntuneDelete) {
+            write-host "`tNo Intune Device." -foregroundcolor red
+        } else {
+            foreach ($item in $IntuneDelete) {
+                Remove-MgDeviceManagementManagedDevice -ManagedDeviceID $IntuneDelete.Id
+                write-host "`tItem ID: $($item.ID)" -ForegroundColor Green
+                write-host "`tItem Name: $($item.DeviceName)" -ForegroundColor Green
+            }
+            write-host "`tDeleting $($IntuneDelete.DeviceName)" -ForegroundColor Green
+        }
+
+        if ($null -eq $EntraDelete) {
+            write-host "`tNo Entra Device." -foregroundcolor red
+        } else {
+            foreach ($item in $EntraDelete) {
+                Remove-MgDevice -DeviceId $item.Id
+                write-host "`tItem ID: $($item.ID)`nItem Name: $($item.DisplayName)" -ForegroundColor Cyan
+            }
+        }
+
+        if ($null -eq $ADDelete) {
+            write-host "`tNo AD Device." -foregroundcolor red
+        } else {
+            write-host "`tDeleting $($ADDelete.Name)" -ForegroundColor Yellow 
+            foreach ($item in $ADDelete) {
+                Remove-ADObject -identity $item -Recursive -confirm:$false
+                write-host "Removed ADComputer: $($item.Name)"
+            }
+        }
+
+        write-host ""
     }
 }
