@@ -1,5 +1,5 @@
 write-host " Common " -nonewline -BackgroundColor darkred
-write-host " Command " -backgroundcolor Gray -nonewline
+write-host " Command " -ForegroundColor Black -backgroundcolor Gray -nonewline
 write-host " Reference: " -BackgroundColor darkred -nonewline
 Write-Host $($PSStyle.Reset)
 write-host "`tADSync" -foregroundcolor Cyan
