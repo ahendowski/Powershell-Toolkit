@@ -648,15 +648,20 @@ function ADSync {
 }
 
 function Remove-ADEI {
-    Connect-MGGraph -Scopes "Device.ReadWrite.All" -NoWelcome
+    # Grabs clipboard and sets it to an array, using Set-Array
+    # Then cycles through and finds all objects and deletes them appropriately.
 
+    Connect-MGGraph -Scopes "Device.ReadWrite.All" -NoWelcome
     Set-Array -Clipboard
 
+    # Set variables for Intune and Entra to query once.
     write-host "Getting Entra devices" -ForegroundColor Cyan
     $AllEntra = Get-MgDevice -All
     write-host "Getting Intune devices" -ForegroundColor Green
     $AllIntune = Get-MgDeviceManagementManagedDevice -All
     
+    # Cycle through each device in the array and check if it exists in AD, Entra, and Intune.
+    # Prompt to verify deletion, then delete if confirmed.
     foreach ($device in $script:Array) {
         $ADDelete = $null
         $EntraDelete = $null
@@ -691,6 +696,8 @@ function Remove-ADEI {
             break
         }
 
+        # Delete in order of Intune --> Entra --> AD
+        # If it does not exist, it will write 'No [Device]' in the console.
         if ($null -eq $IntuneDelete) {
             write-host "`tNo Intune Device." -foregroundcolor red
         } else {
@@ -720,7 +727,6 @@ function Remove-ADEI {
                 write-host "Removed ADComputer: $($item.Name)"
             }
         }
-
         write-host ""
     }
 }
