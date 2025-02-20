@@ -1,4 +1,30 @@
-# Reusable Functions
+write-host " Common " -nonewline -BackgroundColor darkred
+write-host " Command " -backgroundcolor Gray -nonewline
+write-host " Reference: " -BackgroundColor darkred -nonewline
+Write-Host $($PSStyle.Reset)
+write-host "`tADSync" -foregroundcolor Cyan
+write-host "`tFind-PC" -foregroundcolor Green -nonewline; write-host " [-c / -a]" -foregroundcolor Yellow
+write-host "`tGet-UninstallString" -foregroundcolor Cyan -nonewline; write-host " [`$Program]" -foregroundcolor Yellow
+write-host "`tGet-DeletedADObjects" -foregroundcolor Green -nonewline; write-host " [`$Computer]" -foregroundcolor Yellow
+write-host "`tRemove-ADEI" -foregroundcolor Red
+
+write-host ""
+write-host "Update-Hendo" -foregroundcolor Green -NoNewline
+write-host " to update all Hendo Functions."
+write-host "HenCmd "-foregroundcolor Green -NoNewline
+write-host "for all other commands."
+
+function Update-Hendo {
+    copy-item "c:\github\Powershell-Toolkit\Hendowski.PS.Toolkit.psm1" "C:\Program Files\PowerShell\7\Modules\Hendowski.PS.Toolkit"
+    copy-item "c:\github\Powershell-Toolkit\Hendowski.PS.Toolkit.psd1" "C:\Program Files\PowerShell\7\Modules\Hendowski.PS.Toolkit"
+    write-host "Hendo Module has been updated." -foregroundcolor Green
+}
+
+
+function HenCmd {
+    Get-Command -Module Hendowski.PS.Toolkit
+    }    
+
 function Set-Array {
     [cmdletbinding()]
     Param (
