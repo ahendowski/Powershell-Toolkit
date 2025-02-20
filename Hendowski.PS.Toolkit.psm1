@@ -25,6 +25,10 @@ function HenCmd {
     Get-Command -Module Hendowski.PS.Toolkit
     }    
 
+
+
+
+
 function Set-Array {
     [cmdletbinding()]
     Param (
@@ -651,7 +655,7 @@ function Remove-ADEI {
     # Grabs clipboard and sets it to an array, using Set-Array
     # Then cycles through and finds all objects and deletes them appropriately.
 
-    Connect-MGGraph -Scopes "Device.ReadWrite.All" -NoWelcome
+    connect-MGGraph -Scopes "Device.ReadWrite.All", "DeviceManagementManagedDevices.ReadWrite.All", "DeviceManagementConfiguration.ReadWrite.All" -nowelcome
     Set-Array -Clipboard
 
     # Set variables for Intune and Entra to query once.
@@ -662,71 +666,94 @@ function Remove-ADEI {
     
     # Cycle through each device in the array and check if it exists in AD, Entra, and Intune.
     # Prompt to verify deletion, then delete if confirmed.
+
+    Write-host "`nTo Be Deleted: " -ForegroundColor Red -nonewline
+    write-host "AD" -ForegroundColor Yellow -nonewline
+    write-host " / " -nonewline
+    write-host "Entra" -ForegroundColor Cyan -nonewline
+    write-host " / " -nonewline
+    write-host "Intune`n`n" -ForegroundColor Green -nonewline
+
     foreach ($device in $script:Array) {
         $ADDelete = $null
         $EntraDelete = $null
         $IntuneDelete = $null
 
-        write-host "Checking $device" -ForegroundColor magenta
+        write-host "$device" -ForegroundColor magenta
         $ADDelete = Get-ADComputer -filter "SamAccountName -like '*$($device)*'"
         $EntraDelete = $AllEntra | Where-Object {$_.DisplayName -like "*$($device)*"}
         $IntuneDelete = $AllIntune | Where-Object {$_.DeviceName -like "*$($device)*"}
 
-        Write-host "All AD Computers to be deleted:" -ForegroundColor Yellow
 
         foreach ($item in $ADDelete) {
-            write-host "`t$item" -ForegroundColor Yellow
-        }
 
-        write-host "All Entracomputers to be deleted:" -ForegroundColor Cyan
+            #Split OU to exclude the CN=PCNAME
+            $OUpath = ($item.distinguishedname -split ',' | Where-Object { $_ -notmatch '^CN='}) -join ','
+            write-host "  $($item.Name) `($OUPath`)" -foregroundcolor Yellow
+        }
 
         foreach ($item in $EntraDelete) {
-            write-host "`t$item.DisplayName" -ForegroundColor Cyan
+            write-host "  $($item.DisplayName) `($($item.ID)`)" -ForegroundColor Cyan
         }
 
-        write-host "All Intune Computers to be deleted:" -ForegroundColor Green
         foreach ($item in $IntuneDelete) {
-            write-host "`t$item.DeviceName" -ForegroundColor Green
+            write-host "  $($item.DeviceName) `($($item.ID)`)" -ForegroundColor Green
         }
+    }
 
-        $UserInput = Read-Host "Do you want to delete the above items? (Y/N)"
+    
+    $UserInput = Read-Host "`nDo you want to delete the above items? (Y/N)"
 
-        if ($UserInput -ne "Y") {
-            write-host "Exiting" -ForegroundColor Red
-            break
-        }
+    if ($UserInput -ne "Y") {
+        write-host "Exiting" -ForegroundColor Red
+        break
+    }
+
+    foreach ($device in $script:Array) {
+        $ADDelete = $null
+        $EntraDelete = $null
+        $IntuneDelete = $null
+
+        $ADDelete = Get-ADComputer -filter "SamAccountName -like '*$($device)*'"
+        $EntraDelete = $AllEntra | Where-Object {$_.DisplayName -like "*$($device)*"}
+        $IntuneDelete = $AllIntune | Where-Object {$_.DeviceName -like "*$($device)*"}
+
 
         # Delete in order of Intune --> Entra --> AD
         # If it does not exist, it will write 'No [Device]' in the console.
+
+        write-host "Deleting $device" -ForegroundColor DarkRed
+
         if ($null -eq $IntuneDelete) {
-            write-host "`tNo Intune Device." -foregroundcolor red
+            write-host "No Intune Device" -foregroundcolor red
         } else {
             foreach ($item in $IntuneDelete) {
+                write-host "  $($item.DeviceName) `($($item.ID)`)" -ForegroundColor DarkGreen
                 Remove-MgDeviceManagementManagedDevice -ManagedDeviceID $IntuneDelete.Id
-                write-host "`tItem ID: $($item.ID)" -ForegroundColor Green
-                write-host "`tItem Name: $($item.DeviceName)" -ForegroundColor Green
             }
-            write-host "`tDeleting $($IntuneDelete.DeviceName)" -ForegroundColor Green
         }
 
         if ($null -eq $EntraDelete) {
-            write-host "`tNo Entra Device." -foregroundcolor red
+            write-host "No Entra Device." -foregroundcolor red
         } else {
             foreach ($item in $EntraDelete) {
+                write-host "  $($item.DisplayName) `($($item.ID)`)" -ForegroundColor DarkCyan
                 Remove-MgDevice -DeviceId $item.Id
-                write-host "`tItem ID: $($item.ID)`nItem Name: $($item.DisplayName)" -ForegroundColor Cyan
+                
             }
         }
 
         if ($null -eq $ADDelete) {
-            write-host "`tNo AD Device." -foregroundcolor red
+            write-host "No AD Device." -foregroundcolor red
         } else {
-            write-host "`tDeleting $($ADDelete.Name)" -ForegroundColor Yellow 
+            write-host "  $($ADDelete.Name)" -ForegroundColor darkYellow 
             foreach ($item in $ADDelete) {
+                $OUpath = ($item.distinguishedname -split ',' | Where-Object { $_ -notmatch '^CN='}) -join ','
+                write-host "  $($item.Name) `($OUPath`)" -foregroundcolor Yellow
                 Remove-ADObject -identity $item -Recursive -confirm:$false
-                write-host "Removed ADComputer: $($item.Name)"
             }
         }
         write-host ""
     }
+    write-host "All devices have been deleted." -ForegroundColor Green
 }
