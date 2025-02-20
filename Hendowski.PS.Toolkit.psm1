@@ -709,6 +709,8 @@ function Remove-ADEI {
         break
     }
 
+    write-host ""
+
     foreach ($device in $script:Array) {
         $ADDelete = $null
         $EntraDelete = $null
@@ -722,10 +724,10 @@ function Remove-ADEI {
         # Delete in order of Intune --> Entra --> AD
         # If it does not exist, it will write 'No [Device]' in the console.
 
-        write-host "Deleting $device" -ForegroundColor DarkRed
+        write-host "Deleting $device" -ForegroundColor Red
 
         if ($null -eq $IntuneDelete) {
-            write-host "No Intune Device" -foregroundcolor red
+            write-host "  No Intune Device" -foregroundcolor DarkRed
         } else {
             foreach ($item in $IntuneDelete) {
                 write-host "  $($item.DeviceName) `($($item.ID)`)" -ForegroundColor DarkGreen
@@ -734,7 +736,7 @@ function Remove-ADEI {
         }
 
         if ($null -eq $EntraDelete) {
-            write-host "No Entra Device." -foregroundcolor red
+            write-host "  No Entra Device." -foregroundcolor DarkRed
         } else {
             foreach ($item in $EntraDelete) {
                 write-host "  $($item.DisplayName) `($($item.ID)`)" -ForegroundColor DarkCyan
@@ -744,16 +746,15 @@ function Remove-ADEI {
         }
 
         if ($null -eq $ADDelete) {
-            write-host "No AD Device." -foregroundcolor red
+            write-host "  No AD Device." -foregroundcolor DarkRed
         } else {
-            write-host "  $($ADDelete.Name)" -ForegroundColor darkYellow 
             foreach ($item in $ADDelete) {
                 $OUpath = ($item.distinguishedname -split ',' | Where-Object { $_ -notmatch '^CN='}) -join ','
-                write-host "  $($item.Name) `($OUPath`)" -foregroundcolor Yellow
+                write-host "  $($item.Name) `($OUPath`)" -foregroundcolor darkyellow
                 Remove-ADObject -identity $item -Recursive -confirm:$false
             }
         }
-        write-host ""
+        
     }
-    write-host "All devices have been deleted." -ForegroundColor Green
+    write-host "`nAll devices have been deleted." -ForegroundColor Green
 }
