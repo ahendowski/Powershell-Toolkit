@@ -655,9 +655,11 @@ function Remove-ADEI {
     # Grabs clipboard and sets it to an array, using Set-Array
     # Then cycles through and finds all objects and deletes them appropriately.
 
-    connect-MGGraph -Scopes "Device.ReadWrite.All", "DeviceManagementManagedDevices.ReadWrite.All", "DeviceManagementConfiguration.ReadWrite.All" -nowelcome
+    write-host "Connecting to MGGraph"
+    connect-MGGraph  -ClientId "b2193728-d737-4a9c-9b07-58d96c154a7a" -TenantId "e9ab118a-9355-41a6-aaad-633046c798b9" -CertificateThumbprint "94099B58C83D043FFAC756E2453A12529F6DAD83" -nowelcome
     Set-Array -Clipboard
 
+    
     # Set variables for Intune and Entra to query once.
     write-host "Getting Entra devices" -ForegroundColor Cyan
     $AllEntra = Get-MgDevice -All
@@ -757,4 +759,5 @@ function Remove-ADEI {
         
     }
     write-host "`nAll devices have been deleted." -ForegroundColor Green
+    Disconnect-MgGraph | out-null
 }
