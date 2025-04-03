@@ -6,7 +6,12 @@ write-host "`tADSync" -foregroundcolor Cyan
 write-host "`tFind-PC" -foregroundcolor Green -nonewline; write-host " [-c / -a]" -foregroundcolor Yellow
 write-host "`tGet-UninstallString" -foregroundcolor Cyan -nonewline; write-host " [`$Program]" -foregroundcolor Yellow
 write-host "`tGet-DeletedADObjects" -foregroundcolor Green -nonewline; write-host " [`$Computer]" -foregroundcolor Yellow
-write-host "`tRemove-ADEI" -foregroundcolor Red
+write-host "`tRemove-ADEI" -ForegroundColor Red -NoNewline; write-host " [-update]`n`t   " -foregroundcolor Yellow -nonewline
+write-host "WARNING: Must have Windows Terminal or Powershell Session pinned to taskbar in slot 7." -BackgroundColor DarkRed -ForegroundColor White -nonewline
+Write-Host $($PSStyle.Reset)
+write-host "`t   " -nonewline
+write-host "If you do not want this, go to Remove-ADEI and comment out Get-PSFocus function." -BackgroundColor DarkRed -ForegroundColor White -nonewline
+Write-Host $($PSStyle.Reset)
 
 write-host ""
 write-host "Update-Hendo" -foregroundcolor Green -NoNewline
@@ -20,14 +25,44 @@ function Update-Hendo {
     write-host "Hendo Module has been updated." -foregroundcolor Green
 }
 
+function Get-PSFocus {
+    Add-Type -TypeDefinition @"
+    using System;
+    using System.Runtime.InteropServices;
+
+    public class Keyboard {
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+        public const int KEYEVENTF_KEYDOWN = 0x0000;
+        public const int KEYEVENTF_KEYUP = 0x0002;
+        public const byte VK_LWIN = 0x5B; // Left Windows key
+        public const byte VK_7 = 0x37;    // Number key 7
+    }
+"@ -PassThru | Out-Null
+
+# Press and hold Windows key
+[Keyboard]::keybd_event([Keyboard]::VK_LWIN, 0, [Keyboard]::KEYEVENTF_KEYDOWN, [UIntPtr]::Zero)
+Start-Sleep -Milliseconds 50
+
+# Press and release '7'
+[Keyboard]::keybd_event([Keyboard]::VK_7, 0, [Keyboard]::KEYEVENTF_KEYDOWN, [UIntPtr]::Zero)
+Start-Sleep -Milliseconds 50
+[Keyboard]::keybd_event([Keyboard]::VK_7, 0, [Keyboard]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
+
+Start-Sleep -Milliseconds 50
+
+# Release Windows key
+[Keyboard]::keybd_event([Keyboard]::VK_LWIN, 0, [Keyboard]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
+}
 
 function HenCmd {
     Get-Command -Module Hendowski.PS.Toolkit
     }    
 
-
-
-
+function Connect-MSGraphHendo {
+    connect-MGGraph  -ClientId "b2193728-d737-4a9c-9b07-58d96c154a7a" -TenantId "e9ab118a-9355-41a6-aaad-633046c798b9" -CertificateThumbprint "94099B58C83D043FFAC756E2453A12529F6DAD83" -nowelcome
+}
 
 function Set-Array {
     [cmdletbinding()]
@@ -55,7 +90,6 @@ function Set-Array {
         }
     } 
 }
-
 
 function Set-ExportPath {
     # Checks to see if the export filepath has a '\' at the end of it.  If it does not, add it.
@@ -404,10 +438,10 @@ function Get-EntraBitlockerKeys {
 
     $export | Set-ExportPath
 
-    connect-mgGraph -Scopes "BitlockerKey.Read.All","Device.Read.All","DeviceManagementManagedDevices.Read.All" -NoWelcome
-    
+    Connect-MSGraphHendo
+
     Write-Host "Grabbing all encrypted devices from Intune" -ForegroundColor Gray
-    $Devices = get-mgdevicemanagementManagedDevice -Filter "OperatingSystem eq 'Windows'" -all | where-object Isencrypted -eq true
+    $Devices = get-mgdevicemanagementManagedDevice -Filter "OperatingSystem eq 'Windows'" -all
 
     # Grabs the total device count to use later on in the Progress
     $totalDevices = $Devices.Count
@@ -490,7 +524,8 @@ function Add-EntraDevicetoGroup {
         }
     }
 
-    Connect-MgGraph -Scopes "Device.Read.All"
+    Connect-MSGraphHendo
+
     write-host "Please enter all computers to add to Entra:" -ForegroundColor Cyan
     Set-Array
     write-host "Please enter the Entra group name:" -ForegroundColor Cyan
@@ -652,30 +687,54 @@ function ADSync {
 }
 
 function Remove-ADEI {
-    # Grabs clipboard and sets it to an array, using Set-Array
-    # Then cycles through and finds all objects and deletes them appropriately.
+    [cmdletbinding()]
+    Param (
+        [Alias("u")]
+        [switch]$Update
+    )
 
-    write-host "Connecting to MGGraph"
-    connect-MGGraph  -ClientId "b2193728-d737-4a9c-9b07-58d96c154a7a" -TenantId "e9ab118a-9355-41a6-aaad-633046c798b9" -CertificateThumbprint "94099B58C83D043FFAC756E2453A12529F6DAD83" -nowelcome
+    # Use Set-Array to create $script:Array from clipboard.
     Set-Array -Clipboard
 
-    
-    # Set variables for Intune and Entra to query once.
-    write-host "Getting Entra devices" -ForegroundColor Cyan
-    $AllEntra = Get-MgDevice -All
-    write-host "Getting Intune devices" -ForegroundColor Green
-    $AllIntune = Get-MgDeviceManagementManagedDevice -All
-    
-    # Cycle through each device in the array and check if it exists in AD, Entra, and Intune.
-    # Prompt to verify deletion, then delete if confirmed.
+    # Checks variable $removeadeidate to compare if ran in 24 hours.
+    # If it has not been run in 24 hours, it will connect to MGGraph and grab all devices.
+    if ($global:removeadeidate) {
+        write-host "Last run time: "-nonewline
+        write-host "$($global:removeadeidate)`n" -ForegroundColor DarkGreen
+    } else {
+        write-host "Running first time.`n" -ForegroundColor DarkGreen
+    }
 
-    Write-host "`nTo Be Deleted: " -ForegroundColor Red -nonewline
+    # Sleep for 5 to verify quickly if the clipboard contained the correct machines.
+    write-host "All devices to be deleted:" -ForegroundColor Yellow
+    foreach ($item in $script:Array) {
+        write-host "$item" -ForegroundColor Magenta
+    }
+    start-sleep -seconds 5
+    write-host ""
+
+    # Connect to MSGraph and query global variables for Entra and Intune.
+    if ($null -eq $global:removeadeidate -or $global:removeadeidate -lt (Get-Date).AddHours((-10)) -or $update) {
+    write-host "Connecting to MGGraph"
+    Connect-MSGraphHendo
+    write-host "Getting Entra devices" -ForegroundColor Cyan
+    $global:AllEntra = Get-MgDevice -All
+    write-host "Getting Intune devices" -ForegroundColor Green
+    $global:AllIntune = Get-MgDeviceManagementManagedDevice -All
+    $global:removeadeidate = Get-Date
+    }
+    
+    # List out all devices found to be deleted.
+
+    Write-host "To Be Deleted: " -ForegroundColor Red -nonewline
     write-host "AD" -ForegroundColor Yellow -nonewline
     write-host " / " -nonewline
     write-host "Entra" -ForegroundColor Cyan -nonewline
     write-host " / " -nonewline
     write-host "Intune`n`n" -ForegroundColor Green -nonewline
+    $confirmcheck = $false
 
+    # Cycle through each device in AD / Entra / Intune and check if it matches Asset tag.
     foreach ($device in $script:Array) {
         $ADDelete = $null
         $EntraDelete = $null
@@ -683,15 +742,14 @@ function Remove-ADEI {
 
         write-host "$device" -ForegroundColor magenta
         $ADDelete = Get-ADComputer -filter "SamAccountName -like '*$($device)*'"
-        $EntraDelete = $AllEntra | Where-Object {$_.DisplayName -like "*$($device)*"}
-        $IntuneDelete = $AllIntune | Where-Object {$_.DeviceName -like "*$($device)*"}
+        $EntraDelete = $global:AllEntra | Where-Object {$_.DisplayName -like "*$($device)*"}
+        $IntuneDelete = $global:AllIntune | Where-Object {$_.DeviceName -like "*$($device)*"}
 
 
         foreach ($item in $ADDelete) {
-
             #Split OU to exclude the CN=PCNAME
             $OUpath = ($item.distinguishedname -split ',' | Where-Object { $_ -notmatch '^CN='}) -join ','
-            write-host "  $($item.Name) `($OUPath`)" -foregroundcolor Yellow
+            write-host "  $($item.Name) `($OUPath`)" -foregroundcolor Yellow            
         }
 
         foreach ($item in $EntraDelete) {
@@ -701,14 +759,30 @@ function Remove-ADEI {
         foreach ($item in $IntuneDelete) {
             write-host "  $($item.DeviceName) `($($item.ID)`)" -ForegroundColor Green
         }
+
+        # IF there are more than 1 device matching Asset Tag, set $confirmcheck to true.
+        # This will prompt the user to confirm deletion.
+        if ($ADDelete.Count -gt 1 -or $EntraDelete.Count -gt 1 -or $IntuneDelete.Count -gt 1) {
+            $confirmcheck = $true
+        }
     }
 
-    
-    $UserInput = Read-Host "`nDo you want to delete the above items? (Y/N)"
+    # If a duplicate is detected, prompt the user to confirm deletion.
+    # Also bring forward the Terminal by pressing Windows Key + 7.
+    # This is a workaround for the console not being in focus when running this script, so the user can see the prompt.
+    # This is a custom solution, for this to be used please make sure you set the Taskbar icon 7 to the Windows Terminal you are running this on.
+    # If the screen is in focus and a confirmation pops up, it will minimize - I don't know how to check for active window.
 
-    if ($UserInput -ne "Y") {
-        write-host "Exiting" -ForegroundColor Red
-        break
+    if ($confirmcheck -eq $true) {
+        # IF YOU DO NOT WANT TO FOREGROUND POWERSHELL, COMMENT OUT GET-PSFOCUS
+        Get-PSFocus
+    
+        $UserInput = Read-Host "`nDo you want to delete the above items? (Y/N)"
+    
+        if ($UserInput -ne "Y") {
+            Write-Host "Exiting" -ForegroundColor Red
+            return
+        }
     }
 
     write-host ""
@@ -719,15 +793,14 @@ function Remove-ADEI {
         $IntuneDelete = $null
 
         $ADDelete = Get-ADComputer -filter "SamAccountName -like '*$($device)*'"
-        $EntraDelete = $AllEntra | Where-Object {$_.DisplayName -like "*$($device)*"}
-        $IntuneDelete = $AllIntune | Where-Object {$_.DeviceName -like "*$($device)*"}
+        $EntraDelete = $global:AllEntra | Where-Object {$_.DisplayName -like "*$($device)*"}
+        $IntuneDelete = $global:AllIntune | Where-Object {$_.DeviceName -like "*$($device)*"}
 
 
         # Delete in order of Intune --> Entra --> AD
         # If it does not exist, it will write 'No [Device]' in the console.
 
         write-host "Deleting $device" -ForegroundColor Red
-
         if ($null -eq $IntuneDelete) {
             write-host "  No Intune Device" -foregroundcolor DarkRed
         } else {
@@ -759,5 +832,5 @@ function Remove-ADEI {
         
     }
     write-host "`nAll devices have been deleted." -ForegroundColor Green
-    Disconnect-MgGraph | out-null
+
 }
